@@ -1,0 +1,9 @@
+/* プレースホルダ用の最小スタイル。納品HTMLのアセットで置き換える */
+.placeholder {
+    display: grid;
+    place-content: center;
+    min-height: 100vh;
+    text-align: center;
+    font-family: sans-serif;
+    color: #333;
+}

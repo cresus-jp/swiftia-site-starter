@@ -1,0 +1,26 @@
+# Cloudflare Pages への Direct Upload デプロイ（Swiftia 公開サイトパイプライン）
+#
+# PAGES_PROJECT_NAME（Actions Variable）と CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
+# （Actions Secret）は、CMS 管理画面の「公開サイト作成」時に自動注入される。
+# 手動デプロイは Actions タブの Run workflow（workflow_dispatch）から実行できる。
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy . --project-name=${{ vars.PAGES_PROJECT_NAME }}

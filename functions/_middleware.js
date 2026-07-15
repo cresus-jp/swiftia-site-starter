@@ -1,5 +1,5 @@
 // Swiftia SEO/OGP エッジ注入 Pages Function（本体 #116）
-// 生成元: swiftia-sdk packages/pages-middleware（commit c29b494）— 直接編集しないこと。
+// 生成元: swiftia-sdk main 7741342（/simplify 適用済）+ ビルド修正 PR #59 — 直接編集しないこと。
 // 更新手順: swiftia-sdk で pnpm build → packages/pages-middleware/dist/_middleware.js をここへコピー
 // ../core/src/utils/file-extension.ts
 var NORMALIZATION_MAP = {
@@ -431,6 +431,21 @@ function escapeHtml(value) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+// ../edge-core/src/html-attributes.ts
+var attributePatterns = /* @__PURE__ */ new Map();
+function readAttribute(attrs, name) {
+  let pattern = attributePatterns.get(name);
+  if (!pattern) {
+    pattern = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "i");
+    attributePatterns.set(name, pattern);
+  }
+  const match = pattern.exec(attrs);
+  if (!match) {
+    return null;
+  }
+  return match[1] ?? match[2] ?? null;
+}
+
 // ../edge-core/src/resolve-injection.ts
 async function resolveInjection(client, element, url) {
   const entity = await resolveEntity(client, element, url);
@@ -503,13 +518,37 @@ function extractSwiftiaElement(html) {
     descriptionTemplate: readAttribute(attrs, "description-template")
   };
 }
-function readAttribute(attrs, name) {
-  const pattern = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "i");
-  const match = pattern.exec(attrs);
-  if (!match) {
-    return null;
+
+// ../edge-core/src/inject.ts
+var PREVIEW_PARAM = "swiftia_preview_token";
+function shouldInjectHtml(method, url, contentType) {
+  return method === "GET" && (contentType?.includes("text/html") ?? false) && !url.searchParams.has(PREVIEW_PARAM);
+}
+function htmlResponseInit(response) {
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.delete("content-encoding");
+  return { status: response.status, statusText: response.statusText, headers };
+}
+async function injectMetaFailOpen(html, init, url, makeClient, logTag) {
+  try {
+    const element = extractSwiftiaElement(html);
+    if (!element) {
+      return new Response(html, init);
+    }
+    const client = makeClient();
+    if (!client) {
+      return new Response(html, init);
+    }
+    const meta = await resolveInjection(client, element, url);
+    if (!meta) {
+      return new Response(html, init);
+    }
+    return injectHead(html, meta, init);
+  } catch (error) {
+    console.error(`[${logTag}] \u30E1\u30BF\u6CE8\u5165\u306B\u5931\u6557\uFF08\u7D20\u306E HTML \u3092\u8FD4\u3059\uFF09:`, error);
+    return new Response(html, init);
   }
-  return match[1] ?? match[2] ?? null;
 }
 
 // src/sdk-script.ts
@@ -521,18 +560,28 @@ function extractSdkScript(html) {
   }
   const attrs = match[0];
   const apiKey = readAttribute(attrs, "data-api-key");
-  const apiBase = readAttribute(attrs, "data-api-base");
-  if (!apiKey || !apiBase) {
+  if (!apiKey) {
     return null;
   }
+  const apiBase = readAttribute(attrs, "data-api-base") || DEFAULT_BASE_URL;
   return { apiKey, apiBase };
 }
 
 // src/index.ts
-var PREVIEW_PARAM = "swiftia_preview_token";
 var PAGES_DEV_SUFFIX = ".pages.dev";
 function shouldInject(method, url, contentType) {
-  return method === "GET" && (contentType?.includes("text/html") ?? false) && !url.hostname.endsWith(PAGES_DEV_SUFFIX) && !url.searchParams.has(PREVIEW_PARAM);
+  return shouldInjectHtml(method, url, contentType) && !url.hostname.endsWith(PAGES_DEV_SUFFIX);
+}
+var clients = /* @__PURE__ */ new Map();
+function clientFor(script) {
+  const key = `${script.apiBase}
+${script.apiKey}`;
+  let client = clients.get(key);
+  if (!client) {
+    client = createClient({ apiKey: script.apiKey, baseUrl: script.apiBase }, { maxRetries: 0 });
+    clients.set(key, client);
+  }
+  return client;
 }
 var onRequest = async (context) => {
   const response = await context.next();
@@ -542,29 +591,17 @@ var onRequest = async (context) => {
   }
   const html = await response.text();
   const init = htmlResponseInit(response);
-  try {
-    const script = extractSdkScript(html);
-    const element = extractSwiftiaElement(html);
-    if (!script || !element) {
-      return new Response(html, init);
-    }
-    const client = createClient({ apiKey: script.apiKey, baseUrl: script.apiBase });
-    const meta = await resolveInjection(client, element, url);
-    if (!meta) {
-      return new Response(html, init);
-    }
-    return injectHead(html, meta, init);
-  } catch (error) {
-    console.error("[pages-middleware] \u30E1\u30BF\u6CE8\u5165\u306B\u5931\u6557\uFF08\u7D20\u306E HTML \u3092\u8FD4\u3059\uFF09:", error);
-    return new Response(html, init);
-  }
+  return injectMetaFailOpen(
+    html,
+    init,
+    url,
+    () => {
+      const script = extractSdkScript(html);
+      return script && clientFor(script);
+    },
+    "pages-middleware"
+  );
 };
-function htmlResponseInit(response) {
-  const headers = new Headers(response.headers);
-  headers.delete("content-length");
-  headers.delete("content-encoding");
-  return { status: response.status, statusText: response.statusText, headers };
-}
 export {
   onRequest,
   shouldInject

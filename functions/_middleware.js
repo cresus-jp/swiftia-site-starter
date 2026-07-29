@@ -1,6 +1,3 @@
-// Swiftia SEO/OGP エッジ注入 Pages Function（本体 #116）
-// 生成元: swiftia-sdk main 7741342（/simplify 適用済）+ ビルド修正 PR #59 — 直接編集しないこと。
-// 更新手順: swiftia-sdk で pnpm build → packages/pages-middleware/dist/_middleware.js をここへコピー
 // ../core/src/utils/file-extension.ts
 var NORMALIZATION_MAP = {
   pdf: "pdf",
@@ -431,19 +428,14 @@ function escapeHtml(value) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-// ../edge-core/src/html-attributes.ts
-var attributePatterns = /* @__PURE__ */ new Map();
-function readAttribute(attrs, name) {
-  let pattern = attributePatterns.get(name);
-  if (!pattern) {
-    pattern = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "i");
-    attributePatterns.set(name, pattern);
+// ../edge-core/src/query-params.ts
+function positiveIntParam(url, name) {
+  const raw = url.searchParams.get(name);
+  if (raw === null || !/^\d+$/.test(raw)) {
+    return void 0;
   }
-  const match = pattern.exec(attrs);
-  if (!match) {
-    return null;
-  }
-  return match[1] ?? match[2] ?? null;
+  const value = Number(raw);
+  return value >= 1 ? value : void 0;
 }
 
 // ../edge-core/src/resolve-injection.ts
@@ -489,13 +481,20 @@ async function resolveEntity(client, element, url) {
   const first = response.categories[0];
   return { meta: first.meta, title: first.title };
 }
-function positiveIntParam(url, name) {
-  const raw = url.searchParams.get(name);
-  if (raw === null || !/^\d+$/.test(raw)) {
-    return void 0;
+
+// ../edge-core/src/html-attributes.ts
+var attributePatterns = /* @__PURE__ */ new Map();
+function readAttribute(attrs, name) {
+  let pattern = attributePatterns.get(name);
+  if (!pattern) {
+    pattern = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "i");
+    attributePatterns.set(name, pattern);
   }
-  const value = Number(raw);
-  return value >= 1 ? value : void 0;
+  const match = pattern.exec(attrs);
+  if (!match) {
+    return null;
+  }
+  return match[1] ?? match[2] ?? null;
 }
 
 // ../edge-core/src/swiftia-element.ts
@@ -524,6 +523,9 @@ var PREVIEW_PARAM = "swiftia_preview_token";
 function shouldInjectHtml(method, url, contentType) {
   return method === "GET" && (contentType?.includes("text/html") ?? false) && !url.searchParams.has(PREVIEW_PARAM);
 }
+function logFailOpen(logTag, what, error) {
+  console.error(`[${logTag}] ${what}\u306B\u5931\u6557\uFF08\u914D\u4FE1\u306F\u7D99\u7D9A\uFF09:`, error);
+}
 function htmlResponseInit(response) {
   const headers = new Headers(response.headers);
   headers.delete("content-length");
@@ -546,13 +548,155 @@ async function injectMetaFailOpen(html, init, url, makeClient, logTag) {
     }
     return injectHead(html, meta, init);
   } catch (error) {
-    console.error(`[${logTag}] \u30E1\u30BF\u6CE8\u5165\u306B\u5931\u6557\uFF08\u7D20\u306E HTML \u3092\u8FD4\u3059\uFF09:`, error);
+    logFailOpen(logTag, "\u30E1\u30BF\u6CE8\u5165", error);
     return new Response(html, init);
   }
 }
 
+// ../edge-core/src/analytics.ts
+var EVENTS_PATH = "/edge/events";
+var SEND_TIMEOUT_MS = 2e3;
+var PREFETCH_HEADERS = ["sec-purpose", "purpose", "x-moz"];
+var PREFETCH_TOKENS = ["prefetch", "prerender"];
+var PREVIEW_PARAM2 = "swiftia_preview_token";
+var sendFailureLogged = false;
+function shouldTrackPageView(request, url, status) {
+  if (request.method !== "GET" || status !== 200) {
+    return false;
+  }
+  if (url.searchParams.has(PREVIEW_PARAM2)) {
+    return false;
+  }
+  return !PREFETCH_HEADERS.some((header) => {
+    const value = request.headers.get(header)?.toLowerCase();
+    return value !== void 0 && PREFETCH_TOKENS.some((token) => value.includes(token));
+  });
+}
+function buildPageViewEvent(request, url, apiKey) {
+  return {
+    api_key: apiKey,
+    host: url.hostname,
+    path: url.pathname,
+    query_id: positiveIntParam(url, "id") ?? null,
+    query_category: positiveIntParam(url, "category") ?? null,
+    referrer: request.headers.get("referer"),
+    country: request.cf?.country ?? null,
+    ip: request.headers.get("cf-connecting-ip") ?? "unknown",
+    ua: request.headers.get("user-agent"),
+    source: "edge"
+  };
+}
+function trackPageView(options) {
+  const { logTag } = options;
+  try {
+    if (!shouldTrackPageView(options.request, options.url, options.status)) {
+      return;
+    }
+    const event = buildPageViewEvent(options.request, options.url, options.apiKey);
+    options.context.waitUntil(
+      fetch(new URL(EVENTS_PATH, options.apiBase), {
+        method: "POST",
+        // accept: 本体のバリデーション失敗時に 302 リダイレクトではなく 422 JSON を返させる
+        // （リダイレクトを follow して無駄なサブリクエストが飛ぶのを防ぐ）
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ events: [event] }),
+        redirect: "manual",
+        signal: AbortSignal.timeout(SEND_TIMEOUT_MS)
+      }).catch((error) => {
+        if (!sendFailureLogged) {
+          sendFailureLogged = true;
+          logFailOpen(logTag, "\u30DA\u30FC\u30B8\u30D3\u30E5\u30FC\u8A08\u6E2C\u306E\u9001\u4FE1", error);
+        }
+      })
+    );
+  } catch (error) {
+    logFailOpen(logTag, "\u30DA\u30FC\u30B8\u30D3\u30E5\u30FC\u8A08\u6E2C", error);
+  }
+}
+
+// ../edge-core/src/sitemap.ts
+var SITEMAP_PATH = "/sitemap.xml";
+var ROBOTS_PATH = "/robots.txt";
+var FETCH_TIMEOUT_MS = 5e3;
+var CACHE_TTL_SECONDS = 3600;
+function seoFileKind(method, url) {
+  if (method !== "GET") {
+    return null;
+  }
+  if (url.pathname === SITEMAP_PATH) {
+    return "sitemap";
+  }
+  return url.pathname === ROBOTS_PATH ? "robots" : null;
+}
+async function serveSeoFile(kind, options) {
+  try {
+    return kind === "robots" ? buildRobotsTxt(options.url) : await serveSitemap(options);
+  } catch (error) {
+    logFailOpen(options.logTag, `${kind} \u306E\u914D\u4FE1`, error);
+    return null;
+  }
+}
+function buildRobotsTxt(url) {
+  const body = ["User-agent: *", "Allow: /", "", `Sitemap: ${url.origin}${SITEMAP_PATH}`, ""].join(
+    "\n"
+  );
+  return new Response(body, {
+    headers: {
+      "content-type": "text/plain; charset=UTF-8",
+      "cache-control": `public, max-age=${CACHE_TTL_SECONDS}`
+    }
+  });
+}
+async function serveSitemap(options) {
+  const cache = edgeCache();
+  const cacheKey = new Request(options.url.toString(), { method: "GET" });
+  const cached = await cache?.match(cacheKey);
+  if (cached) {
+    return cached;
+  }
+  const upstream = await fetch(new URL(`/api/v1/${options.apiKey}/sitemap.xml`, options.apiBase), {
+    headers: { accept: "application/xml" },
+    redirect: "manual",
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+  });
+  if (!upstream.ok) {
+    return null;
+  }
+  const response = new Response(await upstream.text(), {
+    headers: {
+      "content-type": "application/xml; charset=UTF-8",
+      "cache-control": `public, max-age=${CACHE_TTL_SECONDS}`
+    }
+  });
+  if (cache) {
+    options.context.waitUntil(cache.put(cacheKey, response.clone()));
+  }
+  return response;
+}
+function edgeCache() {
+  return typeof caches === "undefined" ? null : caches.default;
+}
+
 // src/sdk-script.ts
 var SCRIPT_PATTERN = /<script\b[^>]*\bdata-api-key\b[^>]*>/i;
+var HOME_SCRIPT_TTL_MS = 3e5;
+var homeScript;
+async function resolveHomeSdkScript(assets, url) {
+  const now = Date.now();
+  if (homeScript && homeScript.expiresAt > now) {
+    return homeScript.script;
+  }
+  const script = await fetchHomeSdkScript(assets, url);
+  homeScript = { script, expiresAt: now + HOME_SCRIPT_TTL_MS };
+  return script;
+}
+async function fetchHomeSdkScript(assets, url) {
+  const response = await assets.next(new Request(new URL("/", url).toString(), { method: "GET" })).catch(() => null);
+  if (!response?.ok) {
+    return null;
+  }
+  return extractSdkScript(await response.text());
+}
 function extractSdkScript(html) {
   const match = SCRIPT_PATTERN.exec(html);
   if (!match) {
@@ -569,8 +713,12 @@ function extractSdkScript(html) {
 
 // src/index.ts
 var PAGES_DEV_SUFFIX = ".pages.dev";
+var LOG_TAG = "pages-middleware";
+function isPagesDev(url) {
+  return url.hostname.endsWith(PAGES_DEV_SUFFIX);
+}
 function shouldInject(method, url, contentType) {
-  return shouldInjectHtml(method, url, contentType) && !url.hostname.endsWith(PAGES_DEV_SUFFIX);
+  return shouldInjectHtml(method, url, contentType) && !isPagesDev(url);
 }
 var clients = /* @__PURE__ */ new Map();
 function clientFor(script) {
@@ -586,23 +734,66 @@ ${script.apiKey}`;
 var onRequest = async (context) => {
   const response = await context.next();
   const url = new URL(context.request.url);
+  const seoFile = seoFileKind(context.request.method, url);
+  if (seoFile) {
+    return serveSeoFileFailOpen(seoFile, context, url, response);
+  }
   if (!shouldInject(context.request.method, url, response.headers.get("content-type"))) {
     return response;
   }
   const html = await response.text();
   const init = htmlResponseInit(response);
+  let script;
+  const resolveScript = () => {
+    if (script === void 0) {
+      script = extractSdkScript(html);
+    }
+    return script;
+  };
+  if (shouldTrackPageView(context.request, url, response.status)) {
+    const sdkScript = resolveScript();
+    if (sdkScript) {
+      trackPageView({
+        apiBase: sdkScript.apiBase,
+        apiKey: sdkScript.apiKey,
+        request: context.request,
+        url,
+        status: response.status,
+        context,
+        logTag: LOG_TAG
+      });
+    }
+  }
   return injectMetaFailOpen(
     html,
     init,
     url,
     () => {
-      const script = extractSdkScript(html);
-      return script && clientFor(script);
+      const sdkScript = resolveScript();
+      return sdkScript && clientFor(sdkScript);
     },
-    "pages-middleware"
+    LOG_TAG
   );
 };
+async function serveSeoFileFailOpen(kind, context, url, response) {
+  if (response.ok || isPagesDev(url)) {
+    return response;
+  }
+  const script = await resolveHomeSdkScript(context, url);
+  if (!script) {
+    return response;
+  }
+  const served = await serveSeoFile(kind, {
+    apiBase: script.apiBase,
+    apiKey: script.apiKey,
+    url,
+    context,
+    logTag: LOG_TAG
+  });
+  return served ?? response;
+}
 export {
+  isPagesDev,
   onRequest,
   shouldInject
 };

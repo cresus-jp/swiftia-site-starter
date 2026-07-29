@@ -43,3 +43,4 @@ GitHub Actions（Direct Upload）で Cloudflare Pages へデプロイする。
 
 - Secrets（`CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`）と Variable（`PAGES_PROJECT_NAME`)は CMS が自動注入する。手動設定は不要
 - `assets/` 以外に静的ディレクトリを追加した場合は `_routes.json` の exclude にも追加する（Function の無駄起動を防ぐ）
+- **このテンプレートの更新は新規生成リポジトリにしか効かない。** 既存の納品リポジトリでエッジ機能（SEO注入・sitemap 配信）を有効にするには、`_routes.json` と `functions/_middleware.js` を個別に反映する必要がある

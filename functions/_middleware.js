@@ -618,7 +618,7 @@ function trackPageView(options) {
 var SITEMAP_PATH = "/sitemap.xml";
 var ROBOTS_PATH = "/robots.txt";
 var FETCH_TIMEOUT_MS = 5e3;
-var CACHE_TTL_SECONDS = 3600;
+var FALLBACK_TTL_SECONDS = 3600;
 function seoFileKind(method, url) {
   if (method !== "GET") {
     return null;
@@ -628,14 +628,6 @@ function seoFileKind(method, url) {
   }
   return url.pathname === ROBOTS_PATH ? "robots" : null;
 }
-async function serveSeoFile(kind, options) {
-  try {
-    return kind === "robots" ? buildRobotsTxt(options.url) : await serveSitemap(options);
-  } catch (error) {
-    logFailOpen(options.logTag, `${kind} \u306E\u914D\u4FE1`, error);
-    return null;
-  }
-}
 function buildRobotsTxt(url) {
   const body = ["User-agent: *", "Allow: /", "", `Sitemap: ${url.origin}${SITEMAP_PATH}`, ""].join(
     "\n"
@@ -643,35 +635,44 @@ function buildRobotsTxt(url) {
   return new Response(body, {
     headers: {
       "content-type": "text/plain; charset=UTF-8",
-      "cache-control": `public, max-age=${CACHE_TTL_SECONDS}`
+      "cache-control": `public, max-age=${FALLBACK_TTL_SECONDS}`
     }
   });
 }
 async function serveSitemap(options) {
-  const cache = edgeCache();
-  const cacheKey = new Request(options.url.toString(), { method: "GET" });
-  const cached = await cache?.match(cacheKey);
-  if (cached) {
-    return cached;
-  }
-  const upstream = await fetch(new URL(`/api/v1/${options.apiKey}/sitemap.xml`, options.apiBase), {
-    headers: { accept: "application/xml" },
-    redirect: "manual",
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
-  });
-  if (!upstream.ok) {
+  try {
+    const cache = edgeCache();
+    const cacheKey = new Request(`${options.url.origin}${SITEMAP_PATH}`, { method: "GET" });
+    const cached = await cache?.match(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const upstream = await fetch(
+      new URL(`/api/v1/${options.apiKey}/sitemap.xml`, options.apiBase),
+      {
+        headers: { accept: "application/xml" },
+        redirect: "manual",
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+      }
+    );
+    if (!upstream.ok) {
+      return null;
+    }
+    const response = new Response(await upstream.text(), {
+      headers: {
+        "content-type": "application/xml; charset=UTF-8",
+        // TTL の政策所有者は本体（config/sitemap.php）。エッジは受け取った値をそのまま使う
+        "cache-control": upstream.headers.get("cache-control") ?? `public, max-age=${FALLBACK_TTL_SECONDS}`
+      }
+    });
+    if (cache) {
+      options.context.waitUntil(cache.put(cacheKey, response.clone()));
+    }
+    return response;
+  } catch (error) {
+    logFailOpen(options.logTag, "sitemap \u306E\u914D\u4FE1", error);
     return null;
   }
-  const response = new Response(await upstream.text(), {
-    headers: {
-      "content-type": "application/xml; charset=UTF-8",
-      "cache-control": `public, max-age=${CACHE_TTL_SECONDS}`
-    }
-  });
-  if (cache) {
-    options.context.waitUntil(cache.put(cacheKey, response.clone()));
-  }
-  return response;
 }
 function edgeCache() {
   return typeof caches === "undefined" ? null : caches.default;
@@ -736,7 +737,7 @@ var onRequest = async (context) => {
   const url = new URL(context.request.url);
   const seoFile = seoFileKind(context.request.method, url);
   if (seoFile) {
-    return serveSeoFileFailOpen(seoFile, context, url, response);
+    return serveSeoFile(seoFile, context, url, response);
   }
   if (!shouldInject(context.request.method, url, response.headers.get("content-type"))) {
     return response;
@@ -775,15 +776,18 @@ var onRequest = async (context) => {
     LOG_TAG
   );
 };
-async function serveSeoFileFailOpen(kind, context, url, response) {
+async function serveSeoFile(kind, context, url, response) {
   if (response.ok || isPagesDev(url)) {
     return response;
+  }
+  if (kind === "robots") {
+    return buildRobotsTxt(url);
   }
   const script = await resolveHomeSdkScript(context, url);
   if (!script) {
     return response;
   }
-  const served = await serveSeoFile(kind, {
+  const served = await serveSitemap({
     apiBase: script.apiBase,
     apiKey: script.apiKey,
     url,
@@ -795,5 +799,6 @@ async function serveSeoFileFailOpen(kind, context, url, response) {
 export {
   isPagesDev,
   onRequest,
+  serveSeoFile,
   shouldInject
 };

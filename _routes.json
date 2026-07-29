@@ -8,8 +8,6 @@
     "/images/*",
     "/img/*",
     "/fonts/*",
-    "/favicon.ico",
-    "/robots.txt",
-    "/sitemap.xml"
+    "/favicon.ico"
   ]
 }

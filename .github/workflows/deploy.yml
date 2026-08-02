@@ -10,6 +10,14 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# 同一ブランチへのデプロイを1本に絞る。
+# サイト構築時は template からのリポジトリ生成（push）と CMS からの workflow_dispatch が
+# ほぼ同時刻に走るため、直列化しないと同じ Pages プロジェクトへの並行デプロイになり
+# 片方が「Failed to publish your Function」で必ず失敗する。
+concurrency:
+  group: pages-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest

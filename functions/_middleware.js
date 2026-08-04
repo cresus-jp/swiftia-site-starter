@@ -732,9 +732,18 @@ ${script.apiKey}`;
   }
   return client;
 }
+function withNoindex(response) {
+  const copy = new Response(response.body, response);
+  copy.headers.set("X-Robots-Tag", "noindex");
+  return copy;
+}
 var onRequest = async (context) => {
-  const response = await context.next();
   const url = new URL(context.request.url);
+  const response = await respond(context, url);
+  return isPagesDev(url) ? withNoindex(response) : response;
+};
+async function respond(context, url) {
+  const response = await context.next();
   const seoFile = seoFileKind(context.request.method, url);
   if (seoFile) {
     return serveSeoFile(seoFile, context, url, response);
@@ -775,7 +784,7 @@ var onRequest = async (context) => {
     },
     LOG_TAG
   );
-};
+}
 async function serveSeoFile(kind, context, url, response) {
   if (response.ok || isPagesDev(url)) {
     return response;

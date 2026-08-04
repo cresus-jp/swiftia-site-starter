@@ -1,0 +1,11 @@
+# OS が自動生成する不要ファイル
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# エディタ・IDE
+.idea/
+.vscode/
+
+# 万一 npm を使った場合の巻き込み防止
+node_modules/

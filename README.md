@@ -8,11 +8,12 @@ GitHub Actions（Direct Upload）で Cloudflare Pages へデプロイする。
 
 | パス | 役割 |
 |---|---|
-| `.github/workflows/deploy.yml` | main への push / workflow_dispatch で `wrangler pages deploy` を実行（`docs/` と README は配信対象から除外） |
+| `.github/workflows/deploy.yml` | main への push / workflow_dispatch で `wrangler pages deploy` を実行（`docs/` `_private/` と README は配信対象から除外） |
 | `functions/_middleware.js` | SEO/OGP エッジ注入 ＋ sitemap.xml / robots.txt 配信 ＋ `*.pages.dev` への noindex 付与（Pages Function・swiftia-sdk のビルド成果物。直接編集しない） |
 | `_routes.json` | Function 起動を HTML ＋ `/sitemap.xml` `/robots.txt` に限定（静的アセットは exclude ＝課金対象外） |
 | `index.html` / `404.html` / `assets/` | プレースホルダ。デザイナー納品の静的HTMLで置き換える |
 | `docs/` | デザイナー向けドキュメント（コーディングガイドライン・Git マニュアル等）。公開サイトには配信されない。原本は swiftia-sdk の `docs/` |
+| `_private/` | 仕様書・顧客支給素材・案件メモの置き場。コミットするが公開サイトには配信されない（詳細は `_private/README.md`） |
 
 ## 新規案件の流れ
 
@@ -44,6 +45,7 @@ GitHub Actions（Direct Upload）で Cloudflare Pages へデプロイする。
 ## 注意
 
 - Secrets（`CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`）と Variable（`PAGES_PROJECT_NAME`)は CMS が自動注入する。手動設定は不要
+- **除外リストに無いファイルはすべて公開される。** リポジトリ直下にコミットしたファイルは `https://{host}/{ファイル名}` でダウンロードできる状態になる。仕様書・顧客支給素材・パスワードを含むメモ等は `_private/` に置く（`.gitignore` するのではなく、コミットしたうえで配信除外する運用）
 - `assets/` 以外に静的ディレクトリを追加した場合は `_routes.json` の exclude にも追加する（Function の無駄起動を防ぐ）
 - `docs/` の原本は swiftia-sdk の `docs/` にある。更新は swiftia-sdk 側で行い、`node scripts/sync-designer-docs.mjs <このリポジトリのパス>` で同期する
 - **このテンプレートの更新は新規生成リポジトリにしか効かない。** 既存の納品リポジトリでエッジ機能（SEO注入・sitemap 配信・noindex）や docs 除外デプロイを有効にするには、`_routes.json`・`functions/_middleware.js`・`.github/workflows/deploy.yml` を個別に反映する必要がある

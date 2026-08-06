@@ -24,6 +24,22 @@ function normalizeFileExtension(ext) {
   return NORMALIZATION_MAP[ext] ?? FALLBACK_CLASS;
 }
 
+// ../core/src/utils/file-size.ts
+function formatFileSize(bytes) {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const formatted = Number.isInteger(value) ? value.toString() : value.toFixed(1);
+  return `${formatted} ${units[unitIndex]}`;
+}
+
 // ../core/src/client/cache.ts
 var MemoryCacheStore = class {
   map = /* @__PURE__ */ new Map();
@@ -203,7 +219,8 @@ function enrichFiles(value) {
     const rawExtension = typeof record.originalName === "string" ? extractFileExtension(record.originalName) : null;
     return {
       ...record,
-      extension: normalizeFileExtension(rawExtension)
+      extension: normalizeFileExtension(rawExtension),
+      fileSizeLabel: typeof record.fileSize === "number" ? formatFileSize(record.fileSize) : ""
     };
   });
 }
@@ -356,6 +373,39 @@ function createClient(config, retryConfig) {
   return new SwiftiaApiClient(config, retryConfig);
 }
 
+// ../core/src/utils/canonical-url.ts
+function resolveCanonicalQueryAllowlist(attr, defaults) {
+  if (attr == null) {
+    return [...defaults];
+  }
+  return attr.split(",").map((segment) => segment.trim()).filter((segment) => segment.length > 0);
+}
+function buildCanonicalUrl(url, allowParams) {
+  const parsed = new URL(url);
+  const original = parsed.searchParams;
+  const next = new URLSearchParams();
+  for (const name of allowParams) {
+    for (const value of original.getAll(name)) {
+      next.append(name, value);
+    }
+  }
+  parsed.search = next.toString();
+  parsed.hash = "";
+  return parsed.toString();
+}
+
+// ../core/src/utils/primary-image.ts
+function resolvePrimaryImage(images) {
+  if (!images || images.length === 0) {
+    return null;
+  }
+  const image1 = images.find((image) => image.fieldKey === "image1");
+  if (image1) {
+    return image1;
+  }
+  return images.reduce((min, image) => image.order < min.order ? image : min);
+}
+
 // ../core/src/utils/meta-resolver.ts
 var TITLE_PLACEHOLDER = "{title}";
 function resolveMeta(input) {
@@ -365,7 +415,9 @@ function resolveMeta(input) {
       input.meta?.description,
       input.descriptionTemplate,
       input.entityTitle
-    )
+    ),
+    canonical: input.currentUrl ? buildCanonicalUrl(input.currentUrl, input.canonicalQueryAllowlist ?? []) : null,
+    ogImage: resolvePrimaryImage(input.images)?.url ?? null
   };
 }
 function resolveValue(metaValue, template, entityTitle) {
@@ -382,6 +434,13 @@ function resolveValue(metaValue, template, entityTitle) {
 function injectHead(html, meta, init) {
   let titleSeen = false;
   let descriptionSeen = false;
+  const syncTargets = [
+    ['head > meta[property="og:title"]', "content", meta.title],
+    ['head > meta[property="og:description"]', "content", meta.description],
+    ['head > link[rel="canonical"]', "href", meta.canonical],
+    ['head > meta[property="og:url"]', "content", meta.canonical],
+    ['head > meta[property="og:image"]', "content", meta.ogImage]
+  ];
   const rewriter = new HTMLRewriter().on("head > title", {
     element(element) {
       titleSeen = true;
@@ -396,19 +455,18 @@ function injectHead(html, meta, init) {
         element.setAttribute("content", meta.description);
       }
     }
-  }).on('head > meta[property="og:title"]', {
-    element(element) {
-      if (meta.title !== null) {
-        element.setAttribute("content", meta.title);
-      }
+  });
+  for (const [selector, attrName, value] of syncTargets) {
+    if (value === null) {
+      continue;
     }
-  }).on('head > meta[property="og:description"]', {
-    element(element) {
-      if (meta.description !== null) {
-        element.setAttribute("content", meta.description);
+    rewriter.on(selector, {
+      element(element) {
+        element.setAttribute(attrName, value);
       }
-    }
-  }).on("head", {
+    });
+  }
+  rewriter.on("head", {
     element(element) {
       element.onEndTag((end) => {
         if (!titleSeen && meta.title !== null) {
@@ -439,18 +497,28 @@ function positiveIntParam(url, name) {
 }
 
 // ../edge-core/src/resolve-injection.ts
+var DEFAULT_CANONICAL_ALLOWLIST = ["id"];
 async function resolveInjection(client, element, url) {
   const entity = await resolveEntity(client, element, url);
   if (!entity) {
     return null;
   }
+  const detailOnlyInput = element.kind === "detail" ? {
+    currentUrl: url.toString(),
+    canonicalQueryAllowlist: resolveCanonicalQueryAllowlist(
+      element.canonicalQuery,
+      DEFAULT_CANONICAL_ALLOWLIST
+    ),
+    images: entity.images
+  } : {};
   const resolved = resolveMeta({
     meta: entity.meta ?? null,
     entityTitle: entity.title,
     titleTemplate: element.titleTemplate,
-    descriptionTemplate: element.descriptionTemplate
+    descriptionTemplate: element.descriptionTemplate,
+    ...detailOnlyInput
   });
-  if (resolved.title === null && resolved.description === null) {
+  if (resolved.title === null && resolved.description === null && resolved.canonical === null && resolved.ogImage === null) {
     return null;
   }
   return resolved;
@@ -462,7 +530,7 @@ async function resolveEntity(client, element, url) {
       return null;
     }
     const response2 = await client.getItem(element.type, id);
-    return { meta: response2.item.meta, title: response2.item.title };
+    return { meta: response2.item.meta, title: response2.item.title, images: response2.item.images };
   }
   const category = positiveIntParam(url, "category");
   if (category !== void 0) {
@@ -514,7 +582,8 @@ function extractSwiftiaElement(html) {
     kind,
     type,
     titleTemplate: readAttribute(attrs, "title-template"),
-    descriptionTemplate: readAttribute(attrs, "description-template")
+    descriptionTemplate: readAttribute(attrs, "description-template"),
+    canonicalQuery: readAttribute(attrs, "canonical-query")
   };
 }
 

@@ -22,6 +22,23 @@ GitHub Actions（Direct Upload）で Cloudflare Pages へデプロイする。
 3. CMS の SDK 置換プロンプト（プロジェクト詳細）を使って Swiftia SDK に置き換え
 4. 各ページの `</body>` 直前に管理画面の「SDKスニペット」を貼り付け
 5. main へ push → 自動で `{slug}.pages.dev`（仮環境）へ反映
+6. 本番公開（CMS で本番昇格）後は push の反映先がテストサイトへ切り替わる（下記）
+
+## デプロイ先の切り替え（本番公開後）
+
+本番公開後に push がそのまま本番へ出ると、顧客サイトが変わる前に確認できる場所が無くなる。
+そのため deploy.yml はイベントごとにデプロイ先を分ける。
+
+| きっかけ | デプロイ先 | 配信URL |
+|---|---|---|
+| `main` への push（本番公開**前**） | production | `{slug}.pages.dev` ＋ 接続済みカスタムドメイン |
+| `main` への push（本番公開**後**） | preview（`PAGES_PUSH_BRANCH`） | `preview.{slug}.pages.dev`（テストサイト） |
+| workflow_dispatch（CMS の「本番へ反映する」/ Actions の Run workflow） | production | `{slug}.pages.dev` ＋ 接続済みカスタムドメイン |
+
+- 切り替えは CMS が Actions Variable `PAGES_PUSH_BRANCH` を書き換えることで行う（本番昇格で `preview`、昇格の取り消しで `main`）
+- Variable が無いリポジトリでは `main` にフォールバックするため、**従来どおり push = 即本番**のまま動く
+- テストサイト（`preview.{slug}.pages.dev`）は最初の preview デプロイが走るまで存在しない
+- テストサイトの Origin は CMS 側で CORS 自動許可されるので、SDK は実データを引ける
 
 ## SEO/OGP エッジ注入について
 
@@ -44,8 +61,8 @@ GitHub Actions（Direct Upload）で Cloudflare Pages へデプロイする。
 
 ## 注意
 
-- Secrets（`CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`）と Variable（`PAGES_PROJECT_NAME`)は CMS が自動注入する。手動設定は不要
+- Secrets（`CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`）と Variable（`PAGES_PROJECT_NAME` / `PAGES_PUSH_BRANCH`）は CMS が自動注入する。手動設定は不要
 - **除外リストに無いファイルはすべて公開される。** リポジトリ直下にコミットしたファイルは `https://{host}/{ファイル名}` でダウンロードできる状態になる。仕様書・顧客支給素材・パスワードを含むメモ等は `_private/` に置く（`.gitignore` するのではなく、コミットしたうえで配信除外する運用）
 - `assets/` 以外に静的ディレクトリを追加した場合は `_routes.json` の exclude にも追加する（Function の無駄起動を防ぐ）
 - `docs/` の原本は swiftia-sdk の `docs/` にある。更新は swiftia-sdk 側で行い、`node scripts/sync-designer-docs.mjs <このリポジトリのパス>` で同期する
-- **このテンプレートの更新は新規生成リポジトリにしか効かない。** 既存の納品リポジトリでエッジ機能（SEO注入・sitemap 配信・noindex）や docs 除外デプロイを有効にするには、`_routes.json`・`functions/_middleware.js`・`.github/workflows/deploy.yml` を個別に反映する必要がある
+- **このテンプレートの更新は新規生成リポジトリにしか効かない。** 既存の納品リポジトリでエッジ機能（SEO注入・sitemap 配信・noindex）や docs 除外デプロイ、公開後のデプロイ分離を有効にするには、`_routes.json`・`functions/_middleware.js`・`.github/workflows/deploy.yml` を個別に反映する必要がある

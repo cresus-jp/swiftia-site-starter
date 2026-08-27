@@ -1,7 +1,7 @@
 # Cloudflare Pages への Direct Upload デプロイ（Swiftia 公開サイトパイプライン）
 #
-# PAGES_PROJECT_NAME（Actions Variable）と CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
-# （Actions Secret）は、CMS 管理画面の「公開サイト作成」時に自動注入される。
+# PAGES_PROJECT_NAME / PAGES_PUSH_BRANCH（Actions Variable）と CLOUDFLARE_API_TOKEN /
+# CLOUDFLARE_ACCOUNT_ID（Actions Secret）は、CMS 管理画面が自動注入する。
 # 手動デプロイは Actions タブの Run workflow（workflow_dispatch）から実行できる。
 name: Deploy to Cloudflare Pages
 
@@ -10,19 +10,30 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# 同一ブランチへのデプロイを1本に絞る。
-# サイト構築時は template からのリポジトリ生成（push）と CMS からの workflow_dispatch が
-# ほぼ同時刻に走るため、直列化しないと同じ Pages プロジェクトへの並行デプロイになり
-# 片方が「Failed to publish your Function」で必ず失敗する。
+# 同一 Pages プロジェクトへの並行デプロイは片方が「Failed to publish your Function」で必ず
+# 失敗するため、デプロイ先が preview / production のどちらでも1本に直列化する。
+#
+# cancel-in-progress は付けない。本番公開後は push（テストサイト）と workflow_dispatch（本番反映）が
+# 同じグループに入るので、打ち切ると「本番へ反映するを押したのに反映されない」が起こる。
 concurrency:
   group: pages-deploy-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      # デプロイ先の Pages ブランチ。Pages プロジェクトの production_branch は main なので、
+      # main へ出すと本番（カスタムドメイン + {project}.pages.dev）、それ以外へ出すと
+      # preview デプロイ（ブランチエイリアス {branch}.{project}.pages.dev）になる。
+      #
+      # - workflow_dispatch（CMS の「本番へ反映する」）は常に本番へ出す
+      # - push は PAGES_PUSH_BRANCH の指す先へ出す。CMS が案件の本番公開状態から設定し、
+      #   公開前は main（＝これまでどおり push で本番へ）、公開後は preview を入れる。
+      #   Variable が無い古いリポジトリでは main にフォールバックし、従来の挙動を保つ。
+      DEPLOY_BRANCH: ${{ github.event_name == 'workflow_dispatch' && 'main' || vars.PAGES_PUSH_BRANCH || 'main' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -47,4 +58,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy ${{ runner.temp }}/site --project-name=${{ vars.PAGES_PROJECT_NAME }}
+          command: pages deploy ${{ runner.temp }}/site --project-name=${{ vars.PAGES_PROJECT_NAME }} --branch=${{ env.DEPLOY_BRANCH }}

@@ -503,6 +503,10 @@ async function resolveInjection(client, element, url) {
   if (!entity) {
     return null;
   }
+  const location = externalRedirectLocation(entity.externalUrl);
+  if (location) {
+    return { action: "redirect", location };
+  }
   const detailOnlyInput = element.kind === "detail" ? {
     currentUrl: url.toString(),
     canonicalQueryAllowlist: resolveCanonicalQueryAllowlist(
@@ -521,7 +525,19 @@ async function resolveInjection(client, element, url) {
   if (resolved.title === null && resolved.description === null && resolved.canonical === null && resolved.ogImage === null) {
     return null;
   }
-  return resolved;
+  return { action: "inject", meta: resolved };
+}
+function externalRedirectLocation(value) {
+  if (!value) {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : null;
 }
 async function resolveEntity(client, element, url) {
   if (element.kind === "detail") {
@@ -529,8 +545,21 @@ async function resolveEntity(client, element, url) {
     if (id === void 0) {
       return null;
     }
-    const response2 = await client.getItem(element.type, id);
-    return { meta: response2.item.meta, title: response2.item.title, images: response2.item.images };
+    const response2 = await client.getItem(element.type, id).catch((error) => {
+      if (isNotFound(error)) {
+        return null;
+      }
+      throw error;
+    });
+    if (!response2) {
+      return null;
+    }
+    return {
+      meta: response2.item.meta,
+      title: response2.item.title,
+      images: response2.item.images,
+      externalUrl: response2.item.externalUrl
+    };
   }
   const category = positiveIntParam(url, "category");
   if (category !== void 0) {
@@ -548,6 +577,9 @@ async function resolveEntity(client, element, url) {
   }
   const first = response.categories[0];
   return { meta: first.meta, title: first.title };
+}
+function isNotFound(error) {
+  return error instanceof SwiftiaApiError && error.status === 404;
 }
 
 // ../edge-core/src/html-attributes.ts
@@ -601,6 +633,12 @@ function htmlResponseInit(response) {
   headers.delete("content-encoding");
   return { status: response.status, statusText: response.statusText, headers };
 }
+function externalRedirect(location) {
+  return new Response(null, {
+    status: 302,
+    headers: { location, "cache-control": "no-store" }
+  });
+}
 async function injectMetaFailOpen(html, init, url, makeClient, logTag) {
   try {
     const element = extractSwiftiaElement(html);
@@ -611,11 +649,14 @@ async function injectMetaFailOpen(html, init, url, makeClient, logTag) {
     if (!client) {
       return new Response(html, init);
     }
-    const meta = await resolveInjection(client, element, url);
-    if (!meta) {
+    const plan = await resolveInjection(client, element, url);
+    if (!plan) {
       return new Response(html, init);
     }
-    return injectHead(html, meta, init);
+    if (plan.action === "redirect") {
+      return externalRedirect(plan.location);
+    }
+    return injectHead(html, plan.meta, init);
   } catch (error) {
     logFailOpen(logTag, "\u30E1\u30BF\u6CE8\u5165", error);
     return new Response(html, init);

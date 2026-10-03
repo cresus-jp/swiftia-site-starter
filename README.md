@@ -138,7 +138,7 @@ GitHub Actions（Direct Upload）で Cloudflare Pages へデプロイする。
 
 ### 注意
 
-- README の `{{案件名}}` `{{テストサイトURL}}` `{{公開後テストサイトURL}}` は、CMS が「公開サイト作成」時に案件の値へ置き換えてコミットする（swiftia `CreateProjectSiteAction`）。文言を変えるときはプレースホルダの綴りを変えないこと
+- README 前半の二重波括弧で囲んだプレースホルダ（案件名・テストサイトURL・公開後テストサイトURL）は、CMS が「公開サイト作成」時に案件の値へ置き換えてコミットする（swiftia `CreateProjectSiteAction`）。文言を変えるときはプレースホルダの綴りを変えないこと。また置き換えは README 全体に効くので、説明のためにプレースホルダそのものを書かないこと
 - Secrets（`CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`）と Variable（`PAGES_PROJECT_NAME` / `PAGES_PUSH_BRANCH`）は CMS が自動注入する。手動設定は不要
 - **除外リストに無いファイルはすべて公開される。** リポジトリ直下にコミットしたファイルは `https://{host}/{ファイル名}` でダウンロードできる状態になる。仕様書・顧客支給素材・パスワードを含むメモ等は `_private/` に置く（`.gitignore` するのではなく、コミットしたうえで配信除外する運用）
 - `assets/` 以外に静的ディレクトリを追加した場合は `_routes.json` の exclude にも追加する（Function の無駄起動を防ぐ）

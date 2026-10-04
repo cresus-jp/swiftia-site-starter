@@ -337,7 +337,7 @@ CMS の値（日付・タイトル・カテゴリ名など）は、1 つの値 =
 
 一方サイト側はリセット CSS（destyle / normalize 系）で `h1`〜`h6` の `font-size` / `font-weight` を `inherit` に、`ul` / `ol` の `list-style` を `none` に、`p` の `margin` を 0 に潰しているのが普通です。放置すると **CMS で設定した見出しが本文と見分けの付かない状態で公開されます**（2026-08 に実案件で発生。運用者からは「CMS で設定した見出しが反映されない」という不具合報告として上がってきます）。
 
-**この事故自体は SDK 側で止まるようになりました。** SDK が本文の入った箱に `data-swiftia-html` を付け、リセットで消えた既定（見出しのサイズ・太さ、段落の余白、リストのマーカー、引用の罫線、水平線の余白、リンクの下線）を復旧するスタイルを自動で当てます。**ただしこれは「リセットで消えた既定の復旧」であって、デザインではありません。** サイトの見た目に合わせるのは従来どおり制作側の仕事です。
+**この事故自体は SDK 側で止まるようになりました。** SDK が本文の入った箱に `data-swiftia-html` を付け、リセットで消えた既定（見出し `h2` `h3` のサイズ・太さ、段落の余白、リストのマーカー、引用の罫線、水平線の余白、リンクの下線、YouTube 埋め込みの横幅）を復旧するスタイルを自動で当てます。`h1` `h4`〜`h6`・整形済みテキスト・表・画像・YouTube 以外の埋め込みには SDK の既定が無いので、書き忘れるとリセット CSS のままの見た目で公開されます。**ただしこれは「リセットで消えた既定の復旧」であって、デザインではありません。** サイトの見た目に合わせるのは従来どおり制作側の仕事です。
 
 #### 書き方 — 箱をクラスで囲み、中は要素セレクタで指定する
 
@@ -376,8 +376,8 @@ CMS の本文エディタから出力されうる要素は下表で**打ち止�
 | 引用 | `<blockquote>` | 罫線・背景・内側の余白 |
 | 整形済みテキスト | `<pre><code>` | 等幅フォント・背景・内側の余白、長い行の横スクロール（`overflow-x: auto`） |
 | 水平線 | `<hr>` | 上下マージン |
-| 表 | `<table>` `<tr>` `<th>` `<td>`（**クラスは付きません**。**セルの中身は `<p>` で包まれて出力されます**。`<th>` は運用者が見出し行を設定したときだけ） | 罫線（`border-collapse` と `th` / `td` の `border`）、セルの内側の余白、`th` の背景・太さ、`th > p, td > p { margin-bottom: 0 }`、スマホでのはみ出し対策 |
-| 画像 | `<img style="width: 50%; float: left; margin: …">`（**段落 `<p>` の中に入ります**。幅〔100% / 50% / 25% / 元のサイズ〕・左右の回り込みは `style` 属性で入ります） | `max-width: 100%; height: auto`、回り込みの後始末（下の「落とし穴」参照） |
+| 表 | `<table>` `<colgroup>` `<tbody>` `<tr>` `<th>` `<td>`（**クラスは付きません**。**`<tr>` は `<tbody>` の中に入る**ので `table > tr` のようなセレクタは当たりません。**セルの中身は `<p>` で包まれて出力されます**。`<th>` は運用者が見出し行を設定したときだけ。`<table>` には `style="min-width: …"`、セルには過去データ由来の `style="width / height / background-color"` が付くことがあります） | 罫線（`border-collapse` と `th` / `td` の `border`）、セルの内側の余白、`th` の背景・太さ、`th > p, td > p { margin-bottom: 0 }`、スマホでのはみ出し対策 |
+| 画像 | `<img style="width: 50%; float: left; margin: …">`（**段落 `<p>` の中に入ります**。幅〔100% / 50% / 25% / 元のサイズ〕・左右の回り込みは `style` 属性で入ります。過去データの画像は `style` に `height` が入っていることがあります） | `max-width: 100%; height: auto !important`、回り込みの後始末（下の「落とし穴」参照） |
 | 動画（YouTube） | `<div data-youtube-video><iframe width="640" height="480">` | `iframe { width: 100%; height: auto; aspect-ratio: 16 / 9 }`（属性の 640px のままだとスマホで横にはみ出す） |
 | 動画（Vimeo） / Google マップ | `<iframe width="640" height="360">`（**段落 `<p>` の中に入ります**。YouTube と違い**ラッパーの `div` はありません**。Google マップは HTML コード表示から埋め込みコードを貼ったときの `width` / `height` のまま） | YouTube と同じく横幅いっぱい・縦横比の指定（`iframe` 全体に当てておけば YouTube も含めてまとめて効きます） |
 
@@ -394,11 +394,13 @@ CMS の本文エディタから出力されうる要素は下表で**打ち止�
 .article-body th > p,
 .article-body td > p { margin-bottom: 0; }
 
-/* 画像: 幅・回り込みは style 属性で入るので、はみ出しだけ止める */
-.article-body img { max-width: 100%; height: auto; }
+/* 画像: 幅・回り込みは style 属性で入るので、はみ出しだけ止める。
+   過去データの画像は style に height が入っていることがあり、そのままだと幅だけ縮んで縦横比が崩れるので !important で解除する */
+.article-body img { max-width: 100%; height: auto !important; }
 
-/* 埋め込み（YouTube・Vimeo・Google マップ）: 横幅いっぱいの 16:9 にする */
-.article-body iframe { width: 100%; height: auto; aspect-ratio: 16 / 9; }
+/* 埋め込み（YouTube・Vimeo・Google マップ）: 横幅いっぱいの 16:9 にする。
+   Vimeo・Google マップは段落の中に入るので、block にして行の下の隙間を消す */
+.article-body iframe { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; }
 /* 地図だけ縦横比を変えたい場合は src で見分ける */
 .article-body iframe[src*="google"] { aspect-ratio: 4 / 3; }
 ```

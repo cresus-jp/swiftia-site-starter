@@ -250,6 +250,8 @@ textarea {
 
 郵便番号→住所自動補完（yubinbango）等、**CSSクラスでフックするタイプ**のライブラリは、必要なクラス名（`h-adr`, `p-postal-code`, `p-region`, `p-locality`, `p-street-address`, `p-country-name` 等）をそのまま付与してください。クラスはSDK化後も保持されます。
 
+なお yubinbango はページ読み込み時に1度しかフォームを探さないため、SDK化の際にエンジニアが「フォームを描画した後に yubinbango を付け直す」処理を足します。デザイナーが追加で書くものはありません。
+
 ```html
 <form class="h-adr">
   <span class="p-country-name" style="display: none">Japan</span>

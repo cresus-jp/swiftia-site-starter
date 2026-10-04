@@ -140,7 +140,7 @@ document.querySelector("swiftia-detail")
 
 | タイプ | 例 | 扱い |
 |---|---|---|
-| **CSSクラスでフック**（DOM変化を自動追従） | yubinbango（`h-adr` / `p-postal-code` 等） | 必要クラスをHTMLに付与するだけ。クラスはSDK化後も保持され、明示的な再初期化は基本不要 |
+| **CSSクラスでフック**（読み込み時に1度だけ走査） | yubinbango（`h-adr` / `p-postal-code` 等） | 必要クラスをHTMLに付与するだけでよく、初期化関数を書く必要はない。ただし読み込み時に1度しか要素を探さない（DOMの変化は監視しない）ため、SDK化の際にエンジニアが描画後の再初期化を入れる（エンジニア向けの手順は swiftia-sdk リポジトリの `docs/contact-form-sdk-migration.md` §8-1。デザイナー向けの配布物には含めていない） |
 | **命令的 init・destroy→再init** | Swiper / lightcase / slick | §2 の規約（冪等関数）で書く。描画後に呼び直す |
 | **scan-once・refresh** | AOS / matchHeight | §2-5 のとおり refresh 系APIで再アタッチする |
 

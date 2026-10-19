@@ -1,0 +1,8 @@
+# *.pages.dev（本番デプロイ・preview などのブランチ別名）を検索結果に出さない。
+# 本番ドメインとテストサイト（{CMS のサブドメイン}-test.swiftia.app）は Swiftia の一元運用の Worker を通り、
+# Worker が noindex を付け分けるが、*.pages.dev は Worker を通らないためここで付ける。
+https://:project.pages.dev/*
+  X-Robots-Tag: noindex
+
+https://:version.:project.pages.dev/*
+  X-Robots-Tag: noindex
